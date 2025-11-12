@@ -1,0 +1,390 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Keeper Commander Service Mode REST API",
+    "version": "v2-and-v1",
+    "description": "Self-hosted REST wrapper around Keeper Commander CLI.\n\nAPI v2 provides an asynchronous queue (default in Commander >= 17.1.7). API v1 is a synchronous legacy endpoint (queue disabled).\n\nSecurity: API key in header `api-key`. Optional TLS per service config. FILEDATA placeholder supported for file-based commands."
+  },
+  "servers": [
+    {
+      "url": "http://localhost:{port}/api/v2",
+      "description": "Queue-enabled v2 (default)",
+      "variables": {
+        "port": { "default": "9090" }
+      }
+    },
+    {
+      "url": "http://localhost:{port}/api/v1",
+      "description": "Legacy synchronous v1 (queue disabled)",
+      "variables": {
+        "port": { "default": "9090" }
+      }
+    }
+  ],
+  "tags": [
+    { "name": "Queue (v2)" },
+    { "name": "Direct (v1)" }
+  ],
+  "components": {
+    "securitySchemes": {
+      "ApiKeyAuth": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "api-key",
+        "description": "Service Mode API key generated during service configuration."
+      }
+    },
+    "schemas": {
+      "ExecuteCommandRequest": {
+        "type": "object",
+        "required": ["command"],
+        "properties": {
+          "command": {
+            "type": "string",
+            "description": "Keeper Commander command string, e.g. \"tree\" or \"pam project import --filename=FILEDATA\""
+          },
+          "filedata": {
+            "type": "object",
+            "additionalProperties": true,
+            "description": "Optional JSON blob used when command references FILEDATA; the service writes this to a temp file."
+          }
+        },
+        "example": { "command": "tree" }
+      },
+      "ExecuteCommandRequestWithFiledata": {
+        "allOf": [
+          { "$ref": "#/components/schemas/ExecuteCommandRequest" }
+        ],
+        "example": {
+          "command": "pam project import --filename=FILEDATA --name=\"My PAM Project\"",
+          "filedata": {
+            "project": "My PAM Project",
+            "pam_data": {
+              "resources": [
+                {
+                  "type": "pamDirectory",
+                  "title": "Domain Controller",
+                  "directory_type": "active_directory",
+                  "host": "dc.example.com",
+                  "port": "636",
+                  "use_ssl": true,
+                  "domain_name": "example.com"
+                }
+              ]
+            }
+          }
+        }
+      },
+      "V2AcceptedResponse": {
+        "type": "object",
+        "properties": {
+          "success": { "type": "boolean" },
+          "request_id": { "type": "string" },
+          "status": { "type": "string", "enum": ["queued", "processing", "completed", "failed", "expired"] },
+          "message": { "type": "string" }
+        },
+        "example": {
+          "success": true,
+          "request_id": "550e8400-e29b-41d4-a716-446655440000",
+          "status": "queued",
+          "message": "Request queued successfully. Use /api/v2/status/<request_id> and /api/v2/result/<request_id>."
+        }
+      },
+      "V2StatusResponse": {
+        "type": "object",
+        "properties": {
+          "success": { "type": "boolean" },
+          "request_id": { "type": "string" },
+          "command": { "type": "string" },
+          "status": { "type": "string", "enum": ["queued", "processing", "completed", "failed", "expired"] },
+          "created_at": { "type": "string" },
+          "started_at": { "type": "string" },
+          "completed_at": { "type": "string" }
+        },
+        "example": {
+          "success": true,
+          "request_id": "550e8400-e29b-41d4-a716-446655440000",
+          "command": "tree",
+          "status": "completed",
+          "created_at": "2024-01-15T10:30:00.000000",
+          "started_at": "2024-01-15T10:30:01.000000",
+          "completed_at": "2024-01-15T10:30:03.000000"
+        }
+      },
+      "V2ResultResponse": {
+        "description": "For completed requests, mirrors v1 execution response (command/data/status).",
+        "type": "object",
+        "properties": {
+          "command": { "type": "string" },
+          "data": {
+            "type": "object",
+            "additionalProperties": true,
+            "description": "Command-specific result payload."
+          },
+          "status": { "type": "string", "enum": ["success", "error", "failed"] }
+        },
+        "example": {
+          "command": "tree",
+          "data": [
+            { "level": 0, "name": "Root Folder", "path": "Root Folder" },
+            { "level": 1, "name": "Subfolder", "path": "Root Folder/Subfolder" }
+          ],
+          "status": "success"
+        }
+      },
+      "V2QueueStatus": {
+        "type": "object",
+        "properties": {
+          "success": { "type": "boolean" },
+          "queue_size": { "type": "integer" },
+          "active_requests": { "type": "integer" },
+          "completed_requests": { "type": "integer" },
+          "currently_processing": { "type": "string", "nullable": true },
+          "worker_running": { "type": "boolean" }
+        },
+        "example": {
+          "success": true,
+          "queue_size": 3,
+          "active_requests": 5,
+          "completed_requests": 12,
+          "currently_processing": "550e8400-e29b-41d4-a716-446655440000",
+          "worker_running": true
+        }
+      },
+      "V1ExecuteResponse": {
+        "type": "object",
+        "properties": {
+          "command": { "type": "string" },
+          "data": { "type": "object", "additionalProperties": true },
+          "status": { "type": "string", "enum": ["success", "error", "failed"] }
+        },
+        "example": {
+          "status": "success",
+          "command": "tree",
+          "data": [
+            { "level": 0, "name": "Root Folder", "path": "Root Folder" },
+            { "level": 1, "name": "Subfolder", "path": "Root Folder/Subfolder" }
+          ]
+        }
+      },
+      "ErrorResponse": {
+        "type": "object",
+        "properties": {
+          "status": { "type": "string" },
+          "message": { "type": "string" }
+        },
+        "example": { "status": "error", "message": "Queue is full" }
+      }
+    }
+  },
+  "security": [
+    { "ApiKeyAuth": [] }
+  ],
+  "paths": {
+    "/executecommand-async": {
+      "post": {
+        "tags": ["Queue (v2)"],
+        "summary": "Submit command for asynchronous execution (queued)",
+        "operationId": "ExecuteCommandAsyncV2",
+        "security": [{ "ApiKeyAuth": [] }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/ExecuteCommandRequest" },
+              "examples": {
+                "simple": { "value": { "command": "tree" } },
+                "filedata": {
+                  "value": {
+                    "command": "import FILEDATA --format=json",
+                    "filedata": {
+                      "records": [
+                        { "title": "My Website", "login": "user@example.com", "password": "MyPassword123!" }
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Accepted (queued); use status/result endpoints to track.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/V2AcceptedResponse" }
+              }
+            }
+          },
+          "429": {
+            "description": "Too Many Requests (rate limit)",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } } }
+          },
+          "503": {
+            "description": "Service Unavailable (queue full)",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } } }
+          },
+          "500": { "description": "Internal Server Error" }
+        }
+      }
+    },
+    "/status/{request_id}": {
+      "get": {
+        "tags": ["Queue (v2)"],
+        "summary": "Get status of a queued request",
+        "operationId": "GetRequestStatusV2",
+        "security": [{ "ApiKeyAuth": [] }],
+        "parameters": [
+          { "name": "request_id", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": {
+            "description": "Status payload",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/V2StatusResponse" }
+              }
+            }
+          },
+          "404": {
+            "description": "Request ID not found",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } } }
+          }
+        }
+      }
+    },
+    "/result/{request_id}": {
+      "get": {
+        "tags": ["Queue (v2)"],
+        "summary": "Get result for a completed request",
+        "operationId": "GetRequestResultV2",
+        "security": [{ "ApiKeyAuth": [] }],
+        "parameters": [
+          { "name": "request_id", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": {
+            "description": "Command result (same structure as v1 response)",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/V2ResultResponse" },
+                "examples": {
+                  "tree": {
+                    "value": {
+                      "command": "tree",
+                      "data": [
+                        { "level": 0, "name": "Root Folder", "path": "Root Folder" },
+                        { "level": 1, "name": "Subfolder", "path": "Root Folder/Subfolder" }
+                      ],
+                      "status": "success"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Request ID not found",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } } }
+          }
+        }
+      }
+    },
+    "/queue/status": {
+      "get": {
+        "tags": ["Queue (v2)"],
+        "summary": "Get queue metrics",
+        "operationId": "GetQueueStatusV2",
+        "security": [{ "ApiKeyAuth": [] }],
+        "responses": {
+          "200": {
+            "description": "Queue status",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/V2QueueStatus" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/executecommand": {
+      "post": {
+        "tags": ["Direct (v1)"],
+        "summary": "Execute command synchronously (legacy v1, queue disabled)",
+        "operationId": "ExecuteCommandV1",
+        "security": [{ "ApiKeyAuth": [] }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/ExecuteCommandRequest" },
+              "examples": {
+                "simple": { "value": { "command": "tree" } },
+                "filedata": {
+                  "value": {
+                    "command": "import FILEDATA --format=json",
+                    "filedata": {
+                      "records": [
+                        { "title": "My Website", "login": "user@example.com", "password": "MyPassword123!" }
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Command executed; returns structured or raw data depending on command",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/V1ExecuteResponse" },
+                "examples": {
+                  "ls": {
+                    "value": {
+                      "status": "success",
+                      "command": "ls",
+                      "data": {
+                        "folders": [
+                          { "number": 1, "uid": "folder_uid_string", "name": "My Folder", "flags": "RW" }
+                        ],
+                        "records": [
+                          { "number": 1, "uid": "record_uid_string", "type": "login", "title": "My Login", "description": "Optional description" }
+                        ]
+                      }
+                    }
+                  },
+                  "tree": {
+                    "value": {
+                      "status": "success",
+                      "command": "tree",
+                      "data": [
+                        { "level": 0, "name": "Root Folder", "path": "Root Folder" },
+                        { "level": 1, "name": "Subfolder", "path": "Root Folder/Subfolder" }
+                      ]
+                    }
+                  },
+                  "mkdir": {
+                    "value": {
+                      "status": "success",
+                      "command": "mkdir",
+                      "data": { "folder_uid": "new_folder_uid_string" }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too Many Requests (rate limit)",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } } }
+          },
+          "500": { "description": "Internal Server Error" }
+        }
+      }
+    }
+  }
+}
